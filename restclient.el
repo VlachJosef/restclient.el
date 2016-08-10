@@ -142,6 +142,9 @@
 (defconst restclient-mvar-regexp
   "^\\(:[^: ]+\\)[ \t]*:?=[ \t]*\\(<<\\)[ \t]*$")
 
+(defconst restclient-file-multipart-regexp
+  "^<[ \t]*\\([[:alnum:]-_]+\\)[ \t]+\\([[:alnum:] /;=,._-]+\\)[ \t]+\\([^<>\n]+\\)[ \t]*$")
+
 (defconst restclient-file-regexp
   "^<[ \t]*\\([^<>\n]+\\)[ \t]*$")
 
@@ -411,11 +414,43 @@ The buffer contains the raw HTTP response sent by the server."
     (insert-file-contents path)
     (buffer-string)))
 
+(defun restclient-get-boundary ()
+  "Get a string suitable for use as a multipart boundary."
+  (loop for x to 10 concat (format "%x" (random 500000000))))
+
+
+(defun restclient-make-multipart-data (boundary name filename content mime-type)
+  "Construct a multipart/form-data body string.
+BOUNDARY is the multipart boundary, NAME is the
+name of the parameter; the rest are self-explanatory."
+  (let ((boundary (concat "--" boundary)))
+    (concat boundary "\r\n"
+            "Content-Disposition: form-data; "
+            "name=\"" name "\"; "
+            "filename=\"" filename "\"\r\n"
+            "Content-Type: " mime-type "; "
+            "charset=utf-8\r\n\r\n"
+            content "\r\n"
+            boundary "--\r\n")))
+
+
 (defun restclient-parse-body (entity vars)
-  (if (= 0 (or (string-match restclient-file-regexp entity) 1))
-      (restclient-read-file (match-string 1 entity))
-    (restclient-replace-all-in-string vars entity)))
-  
+  (if (string-match restclient-file-multipart-regexp entity)
+      (let* ((name (match-string 1 entity))
+             (mime-type (match-string 2 entity))
+             (path (match-string 3 entity))
+             (multipart-boundary (restclient-get-boundary))
+             (content-type-header `("Content-Type" . ,(format "multipart/form-data; boundary=%s; charset=utf-8" multipart-boundary)))
+             (content (restclient-make-multipart-data multipart-boundary
+                                                  name
+                                                  (file-name-nondirectory path)
+                                                  (restclient-read-file path)
+                                                  mime-type)))
+        (cons content content-type-header))
+    (if (string-match restclient-file-regexp entity)
+        (list (restclient-read-file (match-string 1 entity)))
+      (list (restclient-replace-all-in-string vars entity)))))
+
 (defun restclient-http-parse-current-and-do (func &rest args)
   (save-excursion
     (goto-char (restclient-current-min))
@@ -434,8 +469,11 @@ The buffer contains the raw HTTP response sent by the server."
         (when (looking-at restclient-empty-line-regexp)
           (forward-line))
         (let* ((cmax (restclient-current-max))
-               (entity (restclient-parse-body (buffer-substring (min (point) cmax) cmax) vars))
+               (entity-and-header (restclient-parse-body (buffer-substring (min (point) cmax) cmax) vars))
+               (entity (car entity-and-header))
+               (header (cdr entity-and-header))
                (url (restclient-replace-all-in-string vars url)))
+          (when header (add-to-list 'headers header))
           (apply func method url headers entity args))))))
 
 (defun restclient-copy-curl-command ()
