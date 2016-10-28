@@ -284,7 +284,7 @@
     (while (re-search-forward "\\\\[Uu]\\([0-9a-fA-F]\\{4\\}\\)" nil t)
       (replace-match (char-to-string (decode-char 'ucs (string-to-number (match-string 1) 16))) t nil))))
 
-(defun restclient-http-handle-response (status method url bufname raw stay-in-window)
+(defun restclient-http-handle-response (status method url bufname raw stay-in-window suppress-response-buffer)
   "Switch to the buffer returned by `url-retreive'.
 The buffer contains the raw HTTP response sent by the server."
   (setq restclient-within-call nil)
@@ -301,9 +301,10 @@ The buffer contains the raw HTTP response sent by the server."
           (restclient-prettify-response method url))
         (buffer-enable-undo)
         (run-hooks 'restclient-response-loaded-hook)
-        (if stay-in-window
-            (display-buffer (current-buffer) t)
-          (switch-to-buffer-other-window (current-buffer)))))))
+        (unless suppress-response-buffer
+          (if stay-in-window
+              (display-buffer (current-buffer) t)
+            (switch-to-buffer-other-window (current-buffer))))))))
 
 (defun restclient-decode-response (raw-http-response-buffer target-buffer-name same-name)
   "Decode the HTTP response using the charset (encoding) specified in the Content-Type header. If no charset is specified, default to UTF-8."
@@ -489,12 +490,12 @@ name of the parameter; the rest are self-explanatory."
       (message "curl command copied to clipboard."))))
 
 ;;;###autoload
-(defun restclient-http-send-current (&optional raw stay-in-window)
+(defun restclient-http-send-current (&optional raw stay-in-window suppress-response-buffer)
   "Sends current request.
 Optional argument RAW don't reformat response if t.
 Optional argument STAY-IN-WINDOW do not move focus to response buffer if t."
   (interactive)
-  (restclient-http-parse-current-and-do 'restclient-http-do raw stay-in-window))
+  (restclient-http-parse-current-and-do 'restclient-http-do raw stay-in-window suppress-response-buffer))
 
 ;;;###autoload
 (defun restclient-http-send-current-raw ()
@@ -507,6 +508,12 @@ Optional argument STAY-IN-WINDOW do not move focus to response buffer if t."
   "Send current request and keep focus in request window."
   (interactive)
   (restclient-http-send-current nil t))
+
+;;;###autoload
+(defun restclient-http-send-current-suppress-response-buffer ()
+  "Send current request but don't show response buffer."
+  (interactive)
+  (restclient-http-send-current nil nil t))
 
 (defun restclient-jump-next ()
   "Jump to next request in buffer."
@@ -571,6 +578,7 @@ Optional argument STAY-IN-WINDOW do not move focus to response buffer if t."
   (local-set-key (kbd "C-c C-c") 'restclient-http-send-current)
   (local-set-key (kbd "C-c C-r") 'restclient-http-send-current-raw)
   (local-set-key (kbd "C-c C-v") 'restclient-http-send-current-stay-in-window)
+  (local-set-key (kbd "C-c C-b") 'restclient-http-send-current-suppress-response-buffer)
   (local-set-key (kbd "C-c C-n") 'restclient-jump-next)
   (local-set-key (kbd "C-c C-p") 'restclient-jump-prev)
   (local-set-key (kbd "C-c C-.") 'restclient-mark-current)
